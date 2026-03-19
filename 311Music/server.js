@@ -10,7 +10,7 @@ app.get("/api/search", async (req, res) => {
   try {
     const q = req.query.q || "system of a down"
     const response = await fetch(
-      `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&media=music&limit=1`
+      `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&media=music&limit=${encodeURIComponent(21)}`
     )
     if (!response.ok) throw new Error(`iTunes error: ${response.status}`)
     const data = await response.json()

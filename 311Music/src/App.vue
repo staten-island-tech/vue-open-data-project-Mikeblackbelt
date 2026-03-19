@@ -8,7 +8,7 @@ const challengerAudioSrc = ref("")
 const error = ref("")
 const loading = ref(false)
 const chartEl = ref(null)
-
+const songAudio = ref(null);
 const gameState = ref("playing") // "playing" | "correct" | "wrong"
 const score = ref(0)
 const streak = ref(0)
@@ -51,6 +51,7 @@ async function fetchPlaycount(artist, track) {
     const data = await res.json()
     return data.playcount ? parseInt(data.playcount) : null
   } catch {
+    console.error(err)
     return null
   }
 }
@@ -76,7 +77,7 @@ async function fetchRandomTrack() {
 
       const result = pool[Math.floor(Math.random() * pool.length)]
       const playcount = await fetchPlaycount(result.artistName, result.trackName)
-
+      console.log(pool.length)
       return {
         trackName: result.trackName,
         artistName: result.artistName,
@@ -86,6 +87,7 @@ async function fetchRandomTrack() {
         playcount: playcount ?? 0,
       }
     } catch {
+      console.error(err)
       continue
     }
   }
@@ -191,6 +193,9 @@ async function makeGuess(pick) {
   const correct = (pick === "song" && songWins) || (pick === "challenger" && !songWins)
 
   gameState.value = correct ? "correct" : "wrong"
+  // In makeGuess, replace the single play call:
+if (songAudio.value) songAudio.value.play()
+if (challengerAudio.value) challengerAudio.value.play()
   if (correct) {
     score.value++
     streak.value++
@@ -203,6 +208,8 @@ async function makeGuess(pick) {
 }
 
 async function nextRound() {
+  if (songAudio.value) { songAudio.value.pause(); songAudio.value.currentTime = 0 }
+if (challengerAudio.value) { challengerAudio.value.pause(); challengerAudio.value.currentTime = 0 }
   gameState.value = "playing"
   song.value = null
   challenger.value = null
@@ -302,14 +309,21 @@ onMounted(() => {
             :src="song.artworkUrl"
             class="w-16 h-16 rounded-xl object-cover"
           />
-          <div class="text-center">
-            <p class="text-white text-sm font-medium leading-tight">{{ song.trackName }}</p>
-            <p class="text-white/40 text-xs mt-0.5">{{ song.artistName }}</p>
-          </div>
+          <!-- Song A name - hidden until guessed -->
+<div class="text-center">
+  <p class="text-white text-sm font-medium leading-tight">
+    {{ gameState !== 'playing' ? song.trackName : '?????' }}
+  </p>
+  <p class="text-white/40 text-xs mt-0.5">
+    {{ gameState !== 'playing' ? song.artistName : '?????' }}
+  </p>
+</div>
+
+<!-- Song A audio - no autoplay, controlled via ref -->
+<audio ref="songAudio" :src="audioSrc" loop class="hidden" />
           <span class="text-xs px-2 py-0.5 rounded-full" :class="GENRE_THEMES[song.genre]?.badge">
             {{ song.genre }}
           </span>
-          <audio :src="audioSrc" autoplay loop class="hidden" />
         </button>
 
         <!-- VSivider -->
@@ -343,9 +357,7 @@ onMounted(() => {
           <span class="text-xs px-2 py-0.5 rounded-full" :class="GENRE_THEMES[challenger.genre]?.badge">
             {{ challenger.genre }}
           </span>
-          <audio :src="challengerAudioSrc" loop class="hidden" />
-        </button>
-
+<audio ref="challengerAudio" :src="challengerAudioSrc" loop class="hidden" />
       </div>
 
       <div ref="chartEl" class="w-full"></div>
@@ -361,4 +373,5 @@ onMounted(() => {
 
     </template>
   </div>
+  <img src="https://www.imagenspng.com.br/wp-content/uploads/2025/05/Tung-Tung-Tung-Sahur-Brainrot-PNG-02.png"></img>
 </template>
