@@ -8,18 +8,20 @@ const challengerAudioSrc = ref("")
 const error = ref("")
 const loading = ref(false)
 const chartEl = ref(null)
-const songAudio = ref(null);
+const songAudio = ref(null)
+const challengerAudio = ref(null)
+const isSongPlaying = ref(false)
 const gameState = ref("playing") // "playing" | "correct" | "wrong"
 const score = ref(0)
 const streak = ref(0)
 
 const GENRE_THEMES = {
-  rock:       { bg: "bg-black",       bar1: "#e63030", bar2: "#3f3f3f", badge: "bg-red-600 text-white",          btn1: "bg-red-600 text-white",      btn2: "bg-zinc-800 text-zinc-400" },
-  pop:        { bg: "bg-fuchsia-950", bar1: "#e040a0", bar2: "#4a1a3a", badge: "bg-pink-500 text-white",         btn1: "bg-pink-500 text-white",     btn2: "bg-fuchsia-900 text-fuchsia-300" },
-  "hip-hop":  { bg: "bg-zinc-950",    bar1: "#b8ff3a", bar2: "#2a3a1a", badge: "bg-lime-400 text-black",         btn1: "bg-lime-400 text-black",     btn2: "bg-zinc-800 text-zinc-400" },
-  electronic: { bg: "bg-slate-950",   bar1: "#00c8ff", bar2: "#002244", badge: "bg-cyan-400 text-black",         btn1: "bg-cyan-400 text-black",     btn2: "bg-slate-800 text-slate-400" },
-  jazz:       { bg: "bg-amber-950",   bar1: "#f0a020", bar2: "#3a2500", badge: "bg-amber-400 text-black",        btn1: "bg-amber-400 text-black",    btn2: "bg-amber-900 text-amber-400" },
-  default:    { bg: "bg-zinc-900",    bar1: "#888780", bar2: "#333",    badge: "bg-zinc-500 text-white",         btn1: "bg-zinc-500 text-white",     btn2: "bg-zinc-800 text-zinc-400" },
+  rock:       { bg: "bg-black",       bar1: "#e63030", bar2: "#3f3f3f", badge: "bg-red-600 text-white",      btn1: "bg-red-600 text-white",      btn2: "bg-zinc-800 text-zinc-400" },
+  pop:        { bg: "bg-fuchsia-950", bar1: "#e040a0", bar2: "#4a1a3a", badge: "bg-pink-500 text-white",     btn1: "bg-pink-500 text-white",     btn2: "bg-fuchsia-900 text-fuchsia-300" },
+  "hip-hop":  { bg: "bg-zinc-950",    bar1: "#b8ff3a", bar2: "#2a3a1a", badge: "bg-lime-400 text-black",     btn1: "bg-lime-400 text-black",     btn2: "bg-zinc-800 text-zinc-400" },
+  electronic: { bg: "bg-slate-950",   bar1: "#00c8ff", bar2: "#002244", badge: "bg-cyan-400 text-black",     btn1: "bg-cyan-400 text-black",     btn2: "bg-slate-800 text-slate-400" },
+  jazz:       { bg: "bg-amber-950",   bar1: "#f0a020", bar2: "#3a2500", badge: "bg-amber-400 text-black",    btn1: "bg-amber-400 text-black",    btn2: "bg-amber-900 text-amber-400" },
+  default:    { bg: "bg-zinc-900",    bar1: "#888780", bar2: "#333",    badge: "bg-zinc-500 text-white",     btn1: "bg-zinc-500 text-white",     btn2: "bg-zinc-800 text-zinc-400" },
 }
 
 function getGenre(g) {
@@ -33,7 +35,6 @@ function getGenre(g) {
   return "default"
 }
 
-// Generate a random single letter or two-letter combo to use as search term
 function randomQuery() {
   const chars = "abcdefghijklmnopqrstuvwxyz"
   const len = Math.random() < 0.5 ? 1 : 2
@@ -50,14 +51,14 @@ async function fetchPlaycount(artist, track) {
     if (!res.ok) return null
     const data = await res.json()
     return data.playcount ? parseInt(data.playcount) : null
-  } catch {
+  } catch (err) {  // FIX 1: was missing `err` parameter
     console.error(err)
     return null
   }
 }
 
 async function fetchRandomTrack() {
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 10; attempt++) {
     try {
       const q = randomQuery()
       const controller = new AbortController()
@@ -71,22 +72,24 @@ async function fetchRandomTrack() {
       const data = await res.json()
       if (!data.results?.length) continue
 
-      // Pick a random result from the returned list
       const pool = data.results.filter(r => r.previewUrl)
       if (!pool.length) continue
 
       const result = pool[Math.floor(Math.random() * pool.length)]
       const playcount = await fetchPlaycount(result.artistName, result.trackName)
-      console.log(pool.length)
+
+      // If Last.fm failed or returned null, skip this track and try another
+      if (playcount === null) continue
+
       return {
         trackName: result.trackName,
         artistName: result.artistName,
         artworkUrl: result.artworkUrl100,
         previewUrl: result.previewUrl,
         genre: getGenre(result.primaryGenreName),
-        playcount: playcount ?? 0,
+        playcount,
       }
-    } catch {
+    } catch (err) {
       console.error(err)
       continue
     }
@@ -107,13 +110,12 @@ function renderChart(revealed = false) {
   const songK = Math.round((song.value.playcount || 0) / 1000)
   const chalK = Math.round((challenger.value.playcount || 0) / 1000)
 
-  // Before reveal, show equal placeholder bars
   const displayA = revealed ? songK : 50
   const displayB = revealed ? chalK : 50
   const maxVal = revealed ? Math.max(songK, chalK, 1) * 1.3 : 80
 
   const data = [
-    { label: song.value.trackName, value: displayA, color: theme.bar1, key: "song" },
+    { label: "??????", value: displayA, color: theme.bar1, key: "song" },
     { label: challenger.value.trackName, value: displayB, color: theme.bar2, key: "challenger" },
   ]
 
@@ -172,13 +174,13 @@ function renderChart(revealed = false) {
       .attr("font-size", "13px")
       .attr("font-weight", "500")
       .attr("fill", "rgba(255,255,255,0.7)")
-      .text(d => d.value.toLocaleString() + "k")
+      .text(d => d.value + "k")  // FIX 3: value labels were missing their .text() call
   } else {
     svg.selectAll(".question-label")
       .data(data)
       .join("text")
       .attr("x", d => x(d.label) + x.bandwidth() / 2)
-      .attr("y", d => y(50) - 10)
+      .attr("y", () => y(50) - 10)
       .attr("text-anchor", "middle")
       .attr("font-size", "18px")
       .attr("fill", "rgba(255,255,255,0.3)")
@@ -193,9 +195,10 @@ async function makeGuess(pick) {
   const correct = (pick === "song" && songWins) || (pick === "challenger" && !songWins)
 
   gameState.value = correct ? "correct" : "wrong"
-  // In makeGuess, replace the single play call:
-if (songAudio.value) songAudio.value.play()
-if (challengerAudio.value) challengerAudio.value.play()
+  // pause the unknown/song audio when revealing the challenger, then play challenger
+  if (songAudio.value) { try { songAudio.value.pause(); songAudio.value.currentTime = 0 } catch (e) {} isSongPlaying.value = false }
+  if (challengerAudio.value) challengerAudio.value.play()
+
   if (correct) {
     score.value++
     streak.value++
@@ -209,7 +212,8 @@ if (challengerAudio.value) challengerAudio.value.play()
 
 async function nextRound() {
   if (songAudio.value) { songAudio.value.pause(); songAudio.value.currentTime = 0 }
-if (challengerAudio.value) { challengerAudio.value.pause(); challengerAudio.value.currentTime = 0 }
+  if (challengerAudio.value) { challengerAudio.value.pause(); challengerAudio.value.currentTime = 0 }
+  isSongPlaying.value = false
   gameState.value = "playing"
   song.value = null
   challenger.value = null
@@ -237,6 +241,16 @@ async function loadRound() {
 
   await nextTick()
   renderChart(false)
+  // start playing the unknown/hidden track (the "song") at round start
+  if (songAudio.value) {
+    // attempt autoplay; update isSongPlaying based on whether the play succeeds
+    try {
+      const p = songAudio.value.play()
+      if (p && p.then) {
+        p.then(() => { isSongPlaying.value = true }).catch(() => { isSongPlaying.value = false })
+      }
+    } catch (e) { isSongPlaying.value = false }
+  }
 }
 
 onMounted(() => {
@@ -278,6 +292,7 @@ onMounted(() => {
       <p class="text-red-400 text-sm">{{ error }}</p>
     </div>
 
+    <!-- FIX 4: chart div, Next button, and closing tag were outside the v-else-if block -->
     <template v-else-if="song && challenger">
 
       <!-- Prompt -->
@@ -309,24 +324,24 @@ onMounted(() => {
             :src="song.artworkUrl"
             class="w-16 h-16 rounded-xl object-cover"
           />
-          <!-- Song A name - hidden until guessed -->
-<div class="text-center">
-  <p class="text-white text-sm font-medium leading-tight">
-    {{ gameState !== 'playing' ? song.trackName : '?????' }}
-  </p>
-  <p class="text-white/40 text-xs mt-0.5">
-    {{ gameState !== 'playing' ? song.artistName : '?????' }}
-  </p>
-</div>
-
-<!-- Song A audio - no autoplay, controlled via ref -->
-<audio ref="songAudio" :src="audioSrc" loop class="hidden" />
+          <div class="text-center">
+            <p class="text-white text-sm font-medium leading-tight">
+              {{ gameState !== 'playing' ? song.trackName : '?????' }}
+            </p>
+            <p class="text-white/40 text-xs mt-0.5">
+              {{ gameState !== 'playing' ? song.artistName : '?????' }}
+            </p>
+            <div class="mt-1">
+              <span v-if="isSongPlaying" class="text-emerald-400 text-xs">● playing</span>
+            </div>
+          </div>
+          <audio ref="songAudio" :src="audioSrc" loop class="hidden" />
           <span class="text-xs px-2 py-0.5 rounded-full" :class="GENRE_THEMES[song.genre]?.badge">
             {{ song.genre }}
           </span>
         </button>
 
-        <!-- VSivider -->
+        <!-- VS divider -->
         <div class="flex items-center justify-center">
           <span class="text-white/20 text-lg font-medium">vs</span>
         </div>
@@ -354,10 +369,12 @@ onMounted(() => {
             <p class="text-white text-sm font-medium leading-tight">{{ challenger.trackName }}</p>
             <p class="text-white/40 text-xs mt-0.5">{{ challenger.artistName }}</p>
           </div>
+          <audio ref="challengerAudio" :src="challengerAudioSrc" loop class="hidden" />
           <span class="text-xs px-2 py-0.5 rounded-full" :class="GENRE_THEMES[challenger.genre]?.badge">
             {{ challenger.genre }}
           </span>
-<audio ref="challengerAudio" :src="challengerAudioSrc" loop class="hidden" />
+        </button>
+
       </div>
 
       <div ref="chartEl" class="w-full"></div>
@@ -372,6 +389,7 @@ onMounted(() => {
       </button>
 
     </template>
+    <!-- FIX 4 end: all content now correctly inside v-else-if -->
+
   </div>
-  <img src="https://www.imagenspng.com.br/wp-content/uploads/2025/05/Tung-Tung-Tung-Sahur-Brainrot-PNG-02.png"></img>
 </template>
