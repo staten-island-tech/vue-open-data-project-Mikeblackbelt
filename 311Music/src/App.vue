@@ -11,9 +11,13 @@ const chartEl = ref(null)
 const songAudio = ref(null)
 const challengerAudio = ref(null)
 const isSongPlaying = ref(false)
-const gameState = ref("playing") // "playing" | "correct" | "wrong"
+const gameState = ref("playing")
 const score = ref(0)
 const streak = ref(0)
+
+const noiseCanvas = ref(null)
+const sigLabel = ref(null)
+let noiseRaf = null
 
 const GENRE_THEMES = {
   rock:       { bg: "bg-black",       bar1: "#e63030", bar2: "#3f3f3f", badge: "bg-red-600 text-white",      btn1: "bg-red-600 text-white",      btn2: "bg-zinc-800 text-zinc-400" },
@@ -24,15 +28,19 @@ const GENRE_THEMES = {
   default:    { bg: "bg-zinc-900",    bar1: "#888780", bar2: "#333",    badge: "bg-zinc-500 text-white",     btn1: "bg-zinc-500 text-white",     btn2: "bg-zinc-800 text-zinc-400" },
 }
 
+// ✅ STYLE ONLY
 function getGenre(g) {
-  if (!g) return "default"
+  if (!g) return "pop"
   const s = g.toLowerCase()
+
   if (s.includes("rock") || s.includes("metal") || s.includes("punk")) return "rock"
   if (s.includes("pop")) return "pop"
   if (s.includes("hip") || s.includes("rap")) return "hip-hop"
   if (s.includes("electro") || s.includes("edm") || s.includes("dance")) return "electronic"
+  if (s.includes('classical')) return 'jazz'
   if (s.includes("jazz") || s.includes("blues") || s.includes("soul")) return "jazz"
-  return "default"
+
+  return "pop" // ✅ fallback always pop
 }
 
 function randomQuery() {
@@ -51,7 +59,7 @@ async function fetchPlaycount(artist, track) {
     if (!res.ok) return null
     const data = await res.json()
     return data.playcount ? parseInt(data.playcount) : null
-  } catch (err) {  // FIX 1: was missing `err` parameter
+  } catch (err) {
     console.error(err)
     return null
   }
@@ -78,7 +86,6 @@ async function fetchRandomTrack() {
       const result = pool[Math.floor(Math.random() * pool.length)]
       const playcount = await fetchPlaycount(result.artistName, result.trackName)
 
-      // If Last.fm failed or returned null, skip this track and try another
       if (playcount === null) continue
 
       return {
@@ -87,6 +94,7 @@ async function fetchRandomTrack() {
         artworkUrl: result.artworkUrl100,
         previewUrl: result.previewUrl,
         genre: getGenre(result.primaryGenreName),
+        rawGenre: result.primaryGenreName || "pop", // ✅ added
         playcount,
       }
     } catch (err) {
@@ -101,7 +109,8 @@ function renderChart(revealed = false) {
   if (!chartEl.value || !window.d3 || !song.value || !challenger.value) return
   chartEl.value.innerHTML = ""
 
-  const theme = GENRE_THEMES[song.value.genre] || GENRE_THEMES.default
+  const theme = GENRE_THEMES[song.value.genre] || GENRE_THEMES.pop
+
   const totalWidth = chartEl.value.clientWidth || 360
   const margin = { top: 24, right: 24, bottom: 52, left: 60 }
   const width = totalWidth - margin.left - margin.right
@@ -174,7 +183,7 @@ function renderChart(revealed = false) {
       .attr("font-size", "13px")
       .attr("font-weight", "500")
       .attr("fill", "rgba(255,255,255,0.7)")
-      .text(d => d.value + "k")  // FIX 3: value labels were missing their .text() call
+      .text(d => d.value + "k")
   } else {
     svg.selectAll(".question-label")
       .data(data)
@@ -188,6 +197,116 @@ function renderChart(revealed = false) {
   }
 }
 
+// ── Signal / static loading effect ──────────────────────────────────────────
+
+function startSignalEffect() {
+  if (!noiseCanvas.value) return
+
+  // cancel any in-progress effect
+  if (noiseRaf) {
+    cancelAnimationFrame(noiseRaf)
+    noiseRaf = null
+  }
+
+  const canvas = noiseCanvas.value
+  const ctx = canvas.getContext("2d")
+  const DURATION = 1600
+  let startTime = null
+
+  function easeInOut(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth
+    canvas.height = window.innerHeight
+  }
+
+  resize()
+
+  function drawFrame(ts) {
+    if (!startTime) startTime = ts
+    const rawProgress = Math.min((ts - startTime) / DURATION, 1)
+    const progress = easeInOut(rawProgress)
+
+    const W = canvas.width
+    const H = canvas.height
+
+    ctx.clearRect(0, 0, W, H)
+
+    const noiseIntensity = 0.5*(1 - progress)
+
+    if (noiseIntensity > 0.01) {
+      const imageData = ctx.createImageData(W, H)
+      const data = imageData.data
+      const clearFrontY = progress * (H + 60) - 60
+
+      for (let y = 0; y < H; y++) {
+        const belowFront = false
+        const distFromFront = Math.abs(y - clearFrontY)
+        const bandBlend = Math.max(0, 1 - distFromFront / 90)
+
+        for (let x = 0; x < W; x++) {
+          const i = (y * W + x) * 4
+
+          if (belowFront && bandBlend < 0.05) {
+            data[i + 3] = 0
+            continue
+          }
+
+          const grain = Math.random()
+          const noiseMix = belowFront ? bandBlend : 1
+          const v = Math.floor(grain * 127.5)
+          const glitch = !belowFront && Math.random() < 0.002 ? 160 : 0
+
+          data[i]     = v + glitch
+          data[i + 1] = v
+          data[i + 2] = v + (Math.random() < 0.04 ? 55 : 0)
+          data[i + 3] = Math.floor(noiseMix * 235 * (0.65 + grain * 0.35))
+        }
+      }
+
+      ctx.putImageData(imageData, 0, 0)
+
+      // bright scanline at the clearing edge
+      const scanY = clearFrontY + 24
+      if (scanY > 0 && scanY < H) {
+        const g = ctx.createLinearGradient(0, scanY - 8, 0, scanY + 8)
+        g.addColorStop(0, "rgba(255,255,255,0)")
+        g.addColorStop(0.5, "rgba(255,255,255,0.6)")
+        g.addColorStop(1, "rgba(255,255,255,0)")
+        ctx.fillStyle = g
+        ctx.fillRect(0, scanY - 8, W, 16)
+      }
+    }
+
+    // fade "Tuning signal…" label in then out
+    if (sigLabel.value) {
+      if (rawProgress < 0.25) {
+        sigLabel.value.style.opacity = String(rawProgress / 0.25)
+      } else if (rawProgress < 0.55) {
+        sigLabel.value.style.opacity = "1"
+      } else if (rawProgress < 0.8) {
+        sigLabel.value.style.opacity = String(1 - (rawProgress - 0.55) / 0.25)
+      } else {
+        sigLabel.value.style.opacity = "0"
+      }
+    }
+
+    if (rawProgress < 1) {
+      noiseRaf = requestAnimationFrame(drawFrame)
+    } else {
+      ctx.clearRect(0, 0, W, H)
+      if (sigLabel.value) sigLabel.value.style.opacity = "0"
+      noiseRaf = null
+    }
+  }
+
+  noiseRaf = requestAnimationFrame(drawFrame)
+}
+
+// ── Game logic ───────────────────────────────────────────────────────────────
+
 async function makeGuess(pick) {
   if (gameState.value !== "playing") return
 
@@ -195,8 +314,11 @@ async function makeGuess(pick) {
   const correct = (pick === "song" && songWins) || (pick === "challenger" && !songWins)
 
   gameState.value = correct ? "correct" : "wrong"
-  // pause the unknown/song audio when revealing the challenger, then play challenger
-  if (songAudio.value) { try { songAudio.value.pause(); songAudio.value.currentTime = 0 } catch (e) {} isSongPlaying.value = false }
+
+  if (songAudio.value) {
+    try { songAudio.value.pause(); songAudio.value.currentTime = 0 } catch (e) {}
+    isSongPlaying.value = false
+  }
   if (challengerAudio.value) challengerAudio.value.play()
 
   if (correct) {
@@ -224,6 +346,9 @@ async function loadRound() {
   loading.value = true
   error.value = ""
 
+  // kick off the signal effect as soon as loading starts
+  startSignalEffect()
+
   const [a, b] = await Promise.all([fetchRandomTrack(), fetchRandomTrack()])
 
   if (!a || !b) {
@@ -241,9 +366,8 @@ async function loadRound() {
 
   await nextTick()
   renderChart(false)
-  // start playing the unknown/hidden track (the "song") at round start
+
   if (songAudio.value) {
-    // attempt autoplay; update isSongPlaying based on whether the play succeeds
     try {
       const p = songAudio.value.play()
       if (p && p.then) {
@@ -268,8 +392,23 @@ onMounted(() => {
 <template>
   <div
     class="min-h-screen flex flex-col px-7 pt-8 pb-6 transition-colors duration-500"
-    :class="song ? GENRE_THEMES[song.genre]?.bg : 'bg-zinc-900'"
+    :class="song ? GENRE_THEMES[song.genre || 'pop']?.bg : 'bg-zinc-900'"
   >
+
+    <!-- Signal / static overlay — always in DOM, covers full viewport -->
+    <canvas
+      ref="noiseCanvas"
+      class="fixed inset-0 pointer-events-none"
+      style="z-index: 50; width: 100%; height: 100%;"
+    />
+    <div
+      ref="sigLabel"
+      class="fixed inset-0 flex items-center justify-center pointer-events-none"
+      style="z-index: 51; opacity: 0; font-size: 11px; letter-spacing: 0.18em; color: rgba(255,255,255,0.6); font-family: monospace; text-transform: uppercase;"
+    >
+      Loading...
+    </div>
+
     <!-- Score bar -->
     <div class="flex items-center justify-between mb-6">
       <div class="flex flex-col">
@@ -284,7 +423,7 @@ onMounted(() => {
 
     <!-- Loading -->
     <div v-if="loading" class="flex-1 flex items-center justify-center">
-      <p class="text-white/40 text-sm tracking-wide animate-pulse">Loading tracks...</p>
+      <p class="text-white/0 text-sm">·</p>
     </div>
 
     <!-- Error -->
@@ -292,7 +431,6 @@ onMounted(() => {
       <p class="text-red-400 text-sm">{{ error }}</p>
     </div>
 
-    <!-- FIX 4: chart div, Next button, and closing tag were outside the v-else-if block -->
     <template v-else-if="song && challenger">
 
       <!-- Prompt -->
@@ -336,8 +474,8 @@ onMounted(() => {
             </div>
           </div>
           <audio ref="songAudio" :src="audioSrc" loop class="hidden" />
-          <span class="text-xs px-2 py-0.5 rounded-full" :class="GENRE_THEMES[song.genre]?.badge">
-            {{ song.genre }}
+          <span class="text-xs px-2 py-0.5 rounded-full" :class="GENRE_THEMES[song.genre || 'pop']?.badge">
+            {{ song.genre || 'pop' }}
           </span>
         </button>
 
@@ -370,7 +508,7 @@ onMounted(() => {
             <p class="text-white/40 text-xs mt-0.5">{{ challenger.artistName }}</p>
           </div>
           <audio ref="challengerAudio" :src="challengerAudioSrc" loop class="hidden" />
-          <span class="text-xs px-2 py-0.5 rounded-full" :class="GENRE_THEMES[challenger.genre]?.badge">
+          <span class="text-xs px-2 py-0.5 rounded-full" :class="GENRE_THEMES[challenger.genre || 'pop']?.badge">
             {{ challenger.genre }}
           </span>
         </button>
@@ -389,7 +527,6 @@ onMounted(() => {
       </button>
 
     </template>
-    <!-- FIX 4 end: all content now correctly inside v-else-if -->
 
   </div>
 </template>
