@@ -50,11 +50,10 @@ function randomQuery() {
   for (let i = 0; i < len; i++) q += chars[Math.floor(Math.random() * chars.length)]
   return q
 }
-
 async function fetchPlaycount(artist, track) {
   try {
     const res = await fetch(
-      `/api/lastfm?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`
+      `/.netlify/functions/lastfm?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`
     )
     if (!res.ok) return null
     const data = await res.json()
@@ -64,14 +63,13 @@ async function fetchPlaycount(artist, track) {
     return null
   }
 }
-
 async function fetchRandomTrack() {
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       const q = randomQuery()
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 5000)
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, {
+      const res = await fetch(`/.netlify/functions/search?q=${encodeURIComponent(q)}`, {
         signal: controller.signal,
       })
       clearTimeout(timeout)
@@ -94,7 +92,7 @@ async function fetchRandomTrack() {
         artworkUrl: result.artworkUrl100,
         previewUrl: result.previewUrl,
         genre: getGenre(result.primaryGenreName),
-        rawGenre: result.primaryGenreName || "pop", // ✅ added
+        rawGenre: result.primaryGenreName || "pop",
         playcount,
       }
     } catch (err) {
