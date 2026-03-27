@@ -1,0 +1,9 @@
+[build]
+  publish = "dist"   # or your build folder
+  functions = "netlify/functions"  # the folder where your Netlify functions live
+
+[functions]
+  node_bundler = "esbuild"
+
+[build.environment]
+  NODE_VERSION = "18"
